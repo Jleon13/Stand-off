@@ -9,17 +9,17 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Tuple
 
 # ========================= CONSTANTS =========================
-TREF = 296.0
-K_B_erg = 1.380649e-16
-C_M_S   = 299792458.0
-C_CM_S  = C_M_S * 100.0
-C2      = 1.43880285
-N_A     = 6.02214086e23
-N_L     = 2.47937196e19
+TREF = 296.0 #Temp ref
+K_B_erg = 1.380649e-16 # Boltzmann constant in erg/K
+C_M_S   = 299792458.0 # Speed of light in m/s
+C_CM_S  = C_M_S * 100.0 # Speed of light in cm/s
+C2      = 1.43880285 #h*c/kB in cm·K
+N_A     = 6.02214086e23 # Avogadro's number
+N_L     = 2.47937196e19 #Density at 1 atm and TREF in molec/cm3, P0/(kB*TREF)
 
 # ========================= DATACLASS =========================
 @dataclass
-class Species:
+class Species: # Gas species parameters
     name: str
     mol: int
     iso: int
@@ -45,7 +45,7 @@ def load_Q_vals(qfile: str, Tref: float, T: float) -> Tuple[float, float]:
     Qcol = df.iloc[:, 1].astype(float).to_numpy()
     Qref = np.interp(Tref, Tcol, Qcol)
     QT   = np.interp(T,    Tcol, Qcol)
-    return float(Qref), float(QT)
+    return float(Qref), float(QT) #TIPS
 
 def read_hitran_par_minimal(path: str) -> Dict[str, np.ndarray]:
     """Read a classic HITRAN .par file (minimal fields)."""
@@ -89,7 +89,7 @@ def voigt_profile(nu: np.ndarray, nu0_shifted: np.ndarray, alpha: np.ndarray, ga
     z = x + 1j * y
     w = wofz(z)
     fV = s2 / np.sqrt(np.pi) / alpha[None, :] * np.real(w)
-    return fV
+    return fV #Fvoigt normalized, is line shape function
 
 def transmittance_for_gas_tile(nu_vec: np.ndarray, H: Dict[str, np.ndarray], sp: Species,
                                Tgas: float, Pair: float, Lm: float, mask_lines: np.ndarray) -> np.ndarray:
