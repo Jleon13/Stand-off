@@ -31,6 +31,14 @@ class Species: # Gas species parameters
     idx_all: np.ndarray | None = field(init=False, default=None)
 
 # ========================= FUNCTIONS =========================
+def convert_atm(P, u):
+    if u == "gcms2":
+        return P/1013.25 * 10**-3
+    elif u == "mbar":
+        return P/1013.25
+def convert_vmr(ppm):
+    return ppm * 1e-6
+
 def load_Q_vals(qfile: str, Tref: float, T: float) -> Tuple[float, float]:
     """Read q*.txt and return Qref=Q(Tref), QT=Q(T)."""
     if not os.path.isfile(qfile):
@@ -92,7 +100,7 @@ def voigt_profile(nu: np.ndarray, nu0_shifted: np.ndarray, alpha: np.ndarray, ga
     return fV #Fvoigt normalized, is line shape function
 
 def transmittance_for_gas_tile(nu_vec: np.ndarray, H: Dict[str, np.ndarray], sp: Species,
-                               Tgas: float, Pair: float, Lm: float, mask_lines: np.ndarray) -> np.ndarray:
+                               Tgas: float, pres: float, Lm: float, mask_lines: np.ndarray) -> np.ndarray:
     """Compute T(nu) for a single gas over a spectral tile."""
     if not np.any(mask_lines):
         return np.ones_like(nu_vec)
@@ -103,7 +111,6 @@ def transmittance_for_gas_tile(nu_vec: np.ndarray, H: Dict[str, np.ndarray], sp:
         H['shift'][mask_lines]
     )
 
-    pres = sp.Pmol + Pair
     nu0s = nu0 + shift * pres
 
     # Temperature scaling of line intensity
@@ -160,7 +167,7 @@ def run_simulation(
     guard: float = 5.0,
     temp_K: float = 296.0,
     L_m: float = 1.0,
-    Pair: float = 1.0,
+    pres: float = 1.0,
     delta_um: float = 0.020,
     save_csv: bool = False,
     outdir: str = 'out',
@@ -202,7 +209,7 @@ def run_simulation(
         for k, sp in enumerate(species):
             idx_tile = sp.idx_all & (H['nu0'] >= a_ext) & (H['nu0'] <= b_ext)
             if np.any(idx_tile):
-                T_ext_each[k, :] = transmittance_for_gas_tile(nu_ext, H, sp, temp_K, Pair, L_m, idx_tile)
+                T_ext_each[k, :] = transmittance_for_gas_tile(nu_ext, H, sp, temp_K, pres, L_m, idx_tile)
 
         T_ext_prod, T_ext_sum = np.prod(T_ext_each, axis=0), np.sum(T_ext_each, axis=0)
 
@@ -275,9 +282,9 @@ def run_simulation(
                 )
 
         # Shared Y-limits for comparability
-        ymin, ymax = 1e-5, 1e3
-        y_ticks = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3]
-        y_tick_labels = ['10⁻⁵', '10⁻⁴', '10⁻³', '10⁻²', '10⁻¹', '10⁰', '10¹', '10²', '10³']
+        ymin, ymax = 1e-6, 1e3
+        y_ticks = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3]
+        y_tick_labels = ['10⁻⁶', '10⁻⁵', '10⁻⁴', '10⁻³', '10⁻²', '10⁻¹', '10⁰', '10¹', '10²', '10³']
 
         # ---------- Figure 1: total attenuation ----------
         A_sum_plot = _positivize(A_dbm_lam_sum)
