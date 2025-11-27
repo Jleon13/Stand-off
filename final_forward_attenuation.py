@@ -172,9 +172,11 @@ def run_simulation(
     save_csv: bool = False,
     outdir: str = 'out',
     make_plots: bool = True,
+    att: bool = True,
 ) -> Dict[str, Any]:
     """
     Compute transmittances/attenuations and return sampled results.
+    Set ``att`` to False to keep the raw transmittance signatures and skip attenuation plotting.
     """
     if not os.path.isfile(parfile):
         raise FileNotFoundError(f"Missing HITRAN .par: {parfile}")
@@ -242,10 +244,14 @@ def run_simulation(
         _, yy = bin_average(lambda_sorted, arr, edges)
         T_each_samp.append(yy)
 
-    # Attenuation in dB/m
-    invL = 1.0 / max(L_m, 1e-300)
-    A_dbm_lam_each = [-(10.0 * invL) * np.log10(np.clip(arr, 1e-300, 1.0)) for arr in T_each_samp]
-    A_dbm_lam_sum = np.sum(np.stack(A_dbm_lam_each, axis=0), axis=0)
+    # Attenuation in dB/m (optional)
+    if att:
+        invL = 1.0 / max(L_m, 1e-300)
+        A_dbm_lam_each = [-(10.0 * invL) * np.log10(np.clip(arr, 1e-300, 1.0)) for arr in T_each_samp]
+        A_dbm_lam_sum = np.sum(np.stack(A_dbm_lam_each, axis=0), axis=0)
+    else:
+        A_dbm_lam_each = None
+        A_dbm_lam_sum = None
 
     # ===================== CONSISTENT PLOTTING + EXPORT =====================
     if make_plots:
@@ -282,81 +288,131 @@ def run_simulation(
                 )
 
         # Shared Y-limits for comparability
-        ymin, ymax = 1e-6, 1e3
-        y_ticks = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3]
-        y_tick_labels = ['10⁻⁶', '10⁻⁵', '10⁻⁴', '10⁻³', '10⁻²', '10⁻¹', '10⁰', '10¹', '10²', '10³']
+        ymin, ymax = 1e-15, 1e4
+        y_ticks = [1e-15, 1e-14, 1e-13, 1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]
+        y_tick_labels = ['10⁻¹⁵', '10⁻¹⁴', '10⁻¹³', '10⁻¹²', '10⁻¹¹', '10⁻¹⁰', '10⁻⁹', '10⁻⁸', '10⁻⁷', '10⁻⁶', '10⁻⁵', '10⁻⁴', '10⁻³', '10⁻²', '10⁻¹', '10⁰', '10¹', '10²', '10³', '10⁴']
 
-        # ---------- Figure 1: total attenuation ----------
-        A_sum_plot = _positivize(A_dbm_lam_sum)
-        fig, ax = plt.subplots(figsize=FIGSIZE)
-        ax.semilogy(lambda_centers, np.where(A_sum_plot >= ymin, A_sum_plot, np.nan),
-                    lw=2.5, color="#1f77b4", label="Total")
-        ax.set_xlabel("Wavelength (µm)")
-        ax.set_ylabel("Attenuation (dB/m)")
-        ax.set_title("Combined atmospheric attenuation")
-        ax.set_ylim(ymin, ymax)
-        ax.set_yticks(y_ticks)
-        ax.set_yticklabels(y_tick_labels)
-        ax.grid(True, which='major', axis='both', color='#bbb', linestyle='-', linewidth=0.8, alpha=0.5)
-        ax.grid(True, which='minor', axis='both', color='#eee', linestyle=':', linewidth=0.5, alpha=0.3)
-        max_idx = np.nanargmax(A_sum_plot)
-        ax.annotate(f"Max: {A_sum_plot[max_idx]:.2e} dB/m",
-                    xy=(lambda_centers[max_idx], A_sum_plot[max_idx]),
-                    xytext=(lambda_centers[max_idx]+1, A_sum_plot[max_idx]*1.5),
-                    arrowprops=dict(arrowstyle="->", color="black"), fontsize=15, color="black")
-        ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True)
-        plt.tight_layout()
-        save_fig(fig, "attenuation_total")
-        plt.show()
-        plt.close(fig)
+        if att:
+            # ---------- Figure 1: total attenuation ----------
+            A_sum_plot = _positivize(A_dbm_lam_sum)
+            fig, ax = plt.subplots(figsize=FIGSIZE)
+            ax.semilogy(lambda_centers, np.where(A_sum_plot >= ymin, A_sum_plot, np.nan),
+                        lw=2.5, color="#1f77b4", label="Total")
+            ax.set_xlabel("Wavelength (µm)")
+            ax.set_ylabel("Attenuation (dB/m)")
+            ax.set_title("Combined atmospheric attenuation")
+            ax.set_ylim(ymin, ymax)
+            ax.set_yticks(y_ticks)
+            ax.set_yticklabels(y_tick_labels)
+            ax.grid(True, which='major', axis='both', color='#bbb', linestyle='-', linewidth=0.8, alpha=0.5)
+            ax.grid(True, which='minor', axis='both', color='#eee', linestyle=':', linewidth=0.5, alpha=0.3)
+            max_idx = np.nanargmax(A_sum_plot)
+            ax.annotate(f"Max: {A_sum_plot[max_idx]:.2e} dB/m",
+                        xy=(lambda_centers[max_idx], A_sum_plot[max_idx]),
+                        xytext=(lambda_centers[max_idx]+1, A_sum_plot[max_idx]*1.5),
+                        arrowprops=dict(arrowstyle="->", color="black"), fontsize=15, color="black")
+            ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True)
+            plt.tight_layout()
+            save_fig(fig, "attenuation_total")
+            plt.show()
+            plt.close(fig)
 
-        # ---------- Figure 2: attenuation by gas ----------
-        A_each_plot = [_positivize(arr) for arr in A_dbm_lam_each]
-        fig, ax = plt.subplots(figsize=FIGSIZE)
-        colors = plt.cm.Set2(np.linspace(0, 1, len(species)))
-        for arr, spc, color in zip(A_each_plot, species, colors):
-            arr_trunc = np.where(arr >= ymin, arr, np.nan)
-            ax.semilogy(lambda_centers, arr_trunc, lw=2, label=spc.name, color=color)
-            max_idx = np.nanargmax(arr)
-            ax.annotate(f"{spc.name}: {arr[max_idx]:.2e}",
-                        xy=(lambda_centers[max_idx], arr[max_idx]),
-                        xytext=(lambda_centers[max_idx]+0.5, arr[max_idx]*1.5),
-                        textcoords="data",
-                        arrowprops=dict(arrowstyle="-", color=color, lw=1.5),
-                        fontsize=13, color=color)
-        ax.set_xlabel("Wavelength (µm)")
-        ax.set_ylabel("Attenuation (dB/m)")
-        ax.set_title("Spectral attenuation by gas")
-        ax.set_ylim(ymin, ymax)
-        ax.set_yticks(y_ticks)
-        ax.set_yticklabels(y_tick_labels)
-        ax.grid(True, which='major', axis='both', color='#bbb', linestyle='-', linewidth=0.8, alpha=0.5)
-        ax.grid(True, which='minor', axis='both', color='#eee', linestyle=':', linewidth=0.5, alpha=0.3)
-        ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True, ncol=2)
-        plt.tight_layout()
-        save_fig(fig, "attenuation_by_gas")
-        plt.show()
-        plt.close(fig)
+            # ---------- Figure 2: attenuation by gas ----------
+            A_each_plot = [_positivize(arr) for arr in A_dbm_lam_each]
+            fig, ax = plt.subplots(figsize=FIGSIZE)
+            colors = plt.cm.Set2(np.linspace(0, 1, len(species)))
+            for arr, spc, color in zip(A_each_plot, species, colors):
+                arr_trunc = np.where(arr >= ymin, arr, np.nan)
+                ax.semilogy(lambda_centers, arr_trunc, lw=2, label=spc.name, color=color)
+                max_idx = np.nanargmax(arr)
+                ax.annotate(f"{spc.name}: {arr[max_idx]:.2e}",
+                            xy=(lambda_centers[max_idx], arr[max_idx]),
+                            xytext=(lambda_centers[max_idx]+0.5, arr[max_idx]*1.5),
+                            textcoords="data",
+                            arrowprops=dict(arrowstyle="-", color=color, lw=1.5),
+                            fontsize=13, color=color)
+            ax.set_xlabel("Wavelength (µm)")
+            ax.set_ylabel("Attenuation (dB/m)")
+            ax.set_title("Spectral attenuation by gas")
+            ax.set_ylim(ymin, ymax)
+            ax.set_yticks(y_ticks)
+            ax.set_yticklabels(y_tick_labels)
+            ax.grid(True, which='major', axis='both', color='#bbb', linestyle='-', linewidth=0.8, alpha=0.5)
+            ax.grid(True, which='minor', axis='both', color='#eee', linestyle=':', linewidth=0.5, alpha=0.3)
+            ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True, ncol=2)
+            plt.tight_layout()
+            save_fig(fig, "attenuation_by_gas")
+            plt.show()
+            plt.close(fig)
+        else:
+            # ---------- Figure 1: total transmittance ----------
+            fig, ax = plt.subplots(figsize=FIGSIZE)
+            ax.plot(lambda_centers, T_prod_samp, lw=2.5, color="#1f77b4", label="Total")
+            ax.set_xlabel("Wavelength (µm)")
+            ax.set_ylabel("Transmittance")
+            ax.set_title("Combined atmospheric transmittance")
+            ax.set_ylim(0.0, 1.02)
+            ax.grid(True, which='both', color='#bbb', linestyle='-', linewidth=0.8, alpha=0.5)
+            ax.legend(loc="lower left", frameon=True, fancybox=True, shadow=True)
+            plt.tight_layout()
+            save_fig(fig, "transmittance_total")
+            plt.show()
+            plt.close(fig)
+
+            # ---------- Figure 2: transmittance by gas ----------
+            fig, ax = plt.subplots(figsize=FIGSIZE)
+            colors = plt.cm.Set2(np.linspace(0, 1, len(species)))
+            for arr, spc, color in zip(T_each_samp, species, colors):
+                ax.plot(lambda_centers, arr, lw=2, label=spc.name, color=color)
+            ax.set_xlabel("Wavelength (µm)")
+            ax.set_ylabel("Transmittance")
+            ax.set_title("Spectral transmittance by gas")
+            ax.set_ylim(0.0, 1.02)
+            ax.grid(True, which='both', color='#bbb', linestyle='-', linewidth=0.8, alpha=0.5)
+            ax.legend(loc="lower left", frameon=True, fancybox=True, shadow=True, ncol=2)
+            plt.tight_layout()
+            save_fig(fig, "transmittance_by_gas")
+            plt.show()
+            plt.close(fig)
 
     # ===================== CSV EXPORT (optional) =====================
     if save_csv:
         os.makedirs(outdir, exist_ok=True)
         # Total
-        df_total = pd.DataFrame({
+        df_total = {
             "lambda_um": lambda_centers,
             "T_total": T_prod_samp,
-            "A_total_dbm": A_dbm_lam_sum
-        })
-        df_total.to_csv(os.path.join(outdir, "attenuation_total.csv"), index=False)
+        }
+        if att:
+            df_total["A_total_dbm"] = A_dbm_lam_sum
+        pd.DataFrame(df_total).to_csv(
+            os.path.join(outdir, "transmission_total.csv" if not att else "attenuation_total.csv"),
+            index=False
+        )
 
-        # By gas (attenuation and transmittance)
+        # By gas (attenuation and/or transmittance)
         cols = {"lambda_um": lambda_centers}
-        for sp, T_arr, A_arr in zip(species, T_each_samp, A_dbm_lam_each):
+        for sp, T_arr in zip(species, T_each_samp):
             cols[f"T_{sp.name}"] = T_arr
-            cols[f"A_{sp.name}_dbm"] = A_arr
-        pd.DataFrame(cols).to_csv(os.path.join(outdir, "attenuation_by_gas.csv"), index=False)
+        if att:
+            for sp, A_arr in zip(species, A_dbm_lam_each):
+                cols[f"A_{sp.name}_dbm"] = A_arr
+        pd.DataFrame(cols).to_csv(
+            os.path.join(outdir, "transmission_by_gas.csv" if not att else "attenuation_by_gas.csv"),
+            index=False
+        )
 
-    return dict(
-        lambda_centers=lambda_centers, T_prod_samp=T_prod_samp, T_each_samp=T_each_samp,
-        A_dbm_lam_sum=A_dbm_lam_sum, A_dbm_lam_each=A_dbm_lam_each, species=species
+    result = dict(
+        lambda_centers=lambda_centers,
+        T_prod_samp=T_prod_samp,
+        T_each_samp=T_each_samp,
+        species=species,
+        att=att,
     )
+    if att:
+        result["A_dbm_lam_sum"] = A_dbm_lam_sum
+        result["A_dbm_lam_each"] = A_dbm_lam_each
+    else:
+        result["A_dbm_lam_sum"] = None
+        result["A_dbm_lam_each"] = None
+    return result
