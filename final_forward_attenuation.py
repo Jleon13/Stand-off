@@ -4,6 +4,7 @@ import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import LogLocator
 from scipy.special import wofz
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Tuple
@@ -38,6 +39,57 @@ def convert_atm(P, u):
         return P/1013.25
 def convert_vmr(ppm):
     return ppm * 1e-6
+
+def txt_to_npy(txt_path, out_path):
+    waves = []
+    trans = []
+
+    with open(txt_path, "r") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                w, t = map(float, line.split())
+                waves.append(w)
+                trans.append(t)
+            except:
+                continue
+            
+    wave = np.array(waves)
+    tr   = np.array(trans)
+    np.save(out_path, [wave, tr])
+    print(f"Guardado como arreglo numpy en: {out_path}.npy")
+
+
+def plot_npy(wave, tr, name):
+    plt.figure(figsize=(16, 7))
+    plt.plot(wave, tr, lw=2.5)
+
+    plt.gca().ticklabel_format(useOffset=False)
+    e = 0.0001
+    plt.ylim(tr.min()-e, tr.max()+e)
+
+    plt.xlabel("Wavelength (microns)")
+    plt.ylabel("Transmittance")
+    plt.title("Spectral Transmittance of "+ name)
+    plt.grid(True)
+    plt.show()
+    
+
+def plot_histogram(wave, name, bins=60, range=None, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(16, 7))
+    else:
+        fig = ax.figure
+    ax.hist(wave, bins=bins, range=range, color="#1ae981", edgecolor='white')
+    ax.set_xlabel('Wavelength (µm)')
+    ax.set_ylabel('Frequency')
+    ax.set_title('Histogram wavelengths of ' + name)
+    ax.grid(True, linestyle='--', alpha=0.5)
+    return ax
+
+
+
 
 def load_Q_vals(qfile: str, Tref: float, T: float) -> Tuple[float, float]:
     """Read q*.txt and return Qref=Q(Tref), QT=Q(T)."""
@@ -147,13 +199,13 @@ def bin_average(x_sorted: np.ndarray, y_sorted: np.ndarray, edges: np.ndarray) -
 def default_species() -> List[Species]:
     base = "TIPS/"
     return [
-        Species(name='H2O', mol=1, iso=1, qfile=base+'q1.txt',  Wg=18.0153, Pmol=1.876e+04/1e6),
-        Species(name='CO2', mol=2, iso=1, qfile=base+'q7.txt',  Wg=44.0095, Pmol=330/1e6),
-        Species(name='O3',  mol=3, iso=1, qfile=base+'q16.txt', Wg=47.9982, Pmol=0.03017/1e6),
-        Species(name='N2O', mol=4, iso=1, qfile=base+'q21.txt', Wg=44.0128, Pmol=0.32/1e6),
-        Species(name='CO',  mol=5, iso=1, qfile=base+'q26.txt', Wg=28.0101, Pmol=0.15/1e6),
+        Species(name='H2O', mol=1, iso=1, qfile=base+'q1.txt',  Wg=18.0105, Pmol=1.876e+04/1e6),
+        Species(name='CO2', mol=2, iso=1, qfile=base+'q7.txt',  Wg=43.9898, Pmol=330/1e6),
+        Species(name='O3',  mol=3, iso=1, qfile=base+'q16.txt', Wg=47.9847, Pmol=0.03017/1e6),
+        Species(name='N2O', mol=4, iso=1, qfile=base+'q21.txt', Wg=44.0010, Pmol=0.32/1e6),
+        Species(name='CO',  mol=5, iso=1, qfile=base+'q26.txt', Wg=27.9949, Pmol=0.15/1e6),
         Species(name='CH4', mol=6, iso=1, qfile=base+'q32.txt', Wg=16.0313, Pmol=1.7/1e6),
-        Species(name='O2',  mol=7, iso=1, qfile=base+'q36.txt', Wg=31.9988, Pmol=0.20946),
+        Species(name='O2',  mol=7, iso=1, qfile=base+'q36.txt', Wg=31.9998, Pmol=0.20946),
     ]
 
 # ========================= MAIN FUNCTION =========================
@@ -170,13 +222,17 @@ def run_simulation(
     pres: float = 1.0,
     delta_um: float = 0.020,
     save_csv: bool = False,
-    outdir: str = 'out',
+    outdir: str = 'OUT',
     make_plots: bool = True,
     att: bool = True,
+    simulated_dir: str = 'SIMULATED',
+    transmission_npy_name: str | None = None,
 ) -> Dict[str, Any]:
     """
     Compute transmittances/attenuations and return sampled results.
     Set ``att`` to False to keep the raw transmittance signatures and skip attenuation plotting.
+    ``simulated_dir`` and ``transmission_npy_name`` control the optional export of transmittance data as a stacked
+    numpy array saved inside the provided directory.
     """
     if not os.path.isfile(parfile):
         raise FileNotFoundError(f"Missing HITRAN .par: {parfile}")
@@ -279,6 +335,31 @@ def run_simulation(
             eps = max(1e-12, np.nanmin(a[a > 0]) * 0.1) if np.any(a > 0) else 1e-12
             return np.clip(a, eps, None)
 
+        def _log_axis_limits(arr: np.ndarray) -> Tuple[float, float]:
+            arr = np.asarray(arr)
+            mask = (arr > 0) & np.isfinite(arr)
+            if not np.any(mask):
+                return 1e-15, 1e4
+            min_val = np.min(arr[mask])
+            max_val = np.max(arr[mask])
+            lower = max(1e-15, min_val * 0.9)
+            upper = max(lower * 10, max_val * 1.2)
+            if lower >= upper:
+                upper = lower * 10
+            return lower, upper
+
+        def _lin_axis_limits(arr: np.ndarray) -> Tuple[float, float]:
+            arr = np.asarray(arr)
+            mask = np.isfinite(arr)
+            if not np.any(mask):
+                return 0.0, 1.0
+            min_val = np.min(arr[mask])
+            max_val = np.max(arr[mask])
+            padding = max(1e-3, 0.05 * max(1.0, max_val - min_val))
+            lower = min_val - padding
+            upper = max_val + padding
+            return lower, upper
+
         def save_fig(fig, basename: str):
             for ext in EXPORT_FORMATS:
                 dpi = DPI_EXPORT if ext.lower() in ("png", "jpg", "jpeg", "tif", "tiff") else None
@@ -287,23 +368,16 @@ def run_simulation(
                     dpi=dpi, bbox_inches="tight", pad_inches=0.05
                 )
 
-        # Shared Y-limits for comparability
-        ymin, ymax = 1e-15, 1e4
-        y_ticks = [1e-15, 1e-14, 1e-13, 1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]
-        y_tick_labels = ['10⁻¹⁵', '10⁻¹⁴', '10⁻¹³', '10⁻¹²', '10⁻¹¹', '10⁻¹⁰', '10⁻⁹', '10⁻⁸', '10⁻⁷', '10⁻⁶', '10⁻⁵', '10⁻⁴', '10⁻³', '10⁻²', '10⁻¹', '10⁰', '10¹', '10²', '10³', '10⁴']
-
         if att:
             # ---------- Figure 1: total attenuation ----------
             A_sum_plot = _positivize(A_dbm_lam_sum)
             fig, ax = plt.subplots(figsize=FIGSIZE)
-            ax.semilogy(lambda_centers, np.where(A_sum_plot >= ymin, A_sum_plot, np.nan),
-                        lw=2.5, color="#1f77b4", label="Total")
+            ax.semilogy(lambda_centers, A_sum_plot, lw=2.5, color="#1f77b4", label="Total")
             ax.set_xlabel("Wavelength (µm)")
             ax.set_ylabel("Attenuation (dB/m)")
             ax.set_title("Combined atmospheric attenuation")
-            ax.set_ylim(ymin, ymax)
-            ax.set_yticks(y_ticks)
-            ax.set_yticklabels(y_tick_labels)
+            ax.set_ylim(*_log_axis_limits(A_sum_plot))
+            ax.yaxis.set_major_locator(LogLocator(base=10.0))
             ax.grid(True, which='major', axis='both', color='#bbb', linestyle='-', linewidth=0.8, alpha=0.5)
             ax.grid(True, which='minor', axis='both', color='#eee', linestyle=':', linewidth=0.5, alpha=0.3)
             max_idx = np.nanargmax(A_sum_plot)
@@ -322,8 +396,7 @@ def run_simulation(
             fig, ax = plt.subplots(figsize=FIGSIZE)
             colors = plt.cm.Set2(np.linspace(0, 1, len(species)))
             for arr, spc, color in zip(A_each_plot, species, colors):
-                arr_trunc = np.where(arr >= ymin, arr, np.nan)
-                ax.semilogy(lambda_centers, arr_trunc, lw=2, label=spc.name, color=color)
+                ax.semilogy(lambda_centers, arr, lw=2, label=spc.name, color=color)
                 max_idx = np.nanargmax(arr)
                 ax.annotate(f"{spc.name}: {arr[max_idx]:.2e}",
                             xy=(lambda_centers[max_idx], arr[max_idx]),
@@ -334,9 +407,8 @@ def run_simulation(
             ax.set_xlabel("Wavelength (µm)")
             ax.set_ylabel("Attenuation (dB/m)")
             ax.set_title("Spectral attenuation by gas")
-            ax.set_ylim(ymin, ymax)
-            ax.set_yticks(y_ticks)
-            ax.set_yticklabels(y_tick_labels)
+            ax.set_ylim(*_log_axis_limits(np.concatenate(A_each_plot)))
+            ax.yaxis.set_major_locator(LogLocator(base=10.0))
             ax.grid(True, which='major', axis='both', color='#bbb', linestyle='-', linewidth=0.8, alpha=0.5)
             ax.grid(True, which='minor', axis='both', color='#eee', linestyle=':', linewidth=0.5, alpha=0.3)
             ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True, ncol=2)
@@ -351,7 +423,7 @@ def run_simulation(
             ax.set_xlabel("Wavelength (µm)")
             ax.set_ylabel("Transmittance")
             ax.set_title("Combined atmospheric transmittance")
-            ax.set_ylim(0.0, 1.02)
+            ax.set_ylim(*_lin_axis_limits(T_prod_samp))
             ax.grid(True, which='both', color='#bbb', linestyle='-', linewidth=0.8, alpha=0.5)
             ax.legend(loc="lower left", frameon=True, fancybox=True, shadow=True)
             plt.tight_layout()
@@ -367,7 +439,7 @@ def run_simulation(
             ax.set_xlabel("Wavelength (µm)")
             ax.set_ylabel("Transmittance")
             ax.set_title("Spectral transmittance by gas")
-            ax.set_ylim(0.0, 1.02)
+            ax.set_ylim(*_lin_axis_limits(np.concatenate(T_each_samp)))
             ax.grid(True, which='both', color='#bbb', linestyle='-', linewidth=0.8, alpha=0.5)
             ax.legend(loc="lower left", frameon=True, fancybox=True, shadow=True, ncol=2)
             plt.tight_layout()
@@ -415,4 +487,16 @@ def run_simulation(
     else:
         result["A_dbm_lam_sum"] = None
         result["A_dbm_lam_each"] = None
+    if transmission_npy_name:
+        sim_root = simulated_dir or 'SIMULATED'
+        sim_root = os.path.abspath(sim_root) if os.path.isabs(sim_root) else os.path.abspath(os.path.join(os.getcwd(), sim_root))
+        os.makedirs(sim_root, exist_ok=True)
+        if not transmission_npy_name.lower().endswith('.npy'):
+            transmission_npy_name = f"{transmission_npy_name}.npy"
+        transmission_path = os.path.join(sim_root, transmission_npy_name)
+        stacked = np.vstack([lambda_centers, T_prod_samp] + T_each_samp)
+        np.save(transmission_path, stacked)
+        result["transmission_npy_path"] = transmission_path
+    else:
+        result["transmission_npy_path"] = None
     return result
