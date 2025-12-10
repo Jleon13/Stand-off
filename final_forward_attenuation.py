@@ -86,7 +86,7 @@ def plot_histogram(wave, name, bins=60, range=None, ax=None):
     ax.set_ylabel('Frequency')
     ax.set_title('Histogram wavelengths of ' + name)
     ax.grid(True, linestyle='--', alpha=0.5)
-    return ax
+    plt.show()
 
 
 
