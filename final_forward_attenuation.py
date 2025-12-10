@@ -141,6 +141,13 @@ def read_hitran_par_minimal(path: str) -> Dict[str, np.ndarray]:
         n_air=np.asarray(n_air, dtype=np.float64), shift=np.asarray(shift, dtype=np.float64)
     )
 
+def count_lines_by_index(parfile: str, index: int) -> int:
+    """Return how many HITRAN lines start with the given molecule index in column 1."""
+    H = read_hitran_par_minimal(parfile)
+    if 'mol' not in H:
+        raise KeyError("HITRAN data missing 'mol' column")
+    return int(np.count_nonzero(H['mol'] == index))
+
 def voigt_profile(nu: np.ndarray, nu0_shifted: np.ndarray, alpha: np.ndarray, gamma: np.ndarray) -> np.ndarray:
     """Return normalized Voigt profile f_V(nu)."""
     s2 = np.sqrt(np.log(2.0))
