@@ -1,5 +1,4 @@
 # ========================= INITIAL SETUP =========================
-# Librerías necesarias para el cálculo espectral y el manejo de datos
 import os
 import math
 import numpy as np
@@ -11,7 +10,6 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Tuple
 
 # ========================= CONSTANTS =========================
-# Constantes físicas base sobre las cuales se escalan intensidades y anchos
 TREF = 296.0 #Temp ref
 K_B_erg = 1.380649e-16 # Boltzmann constant in erg/K
 C_M_S   = 299792458.0 # Speed of light in m/s
@@ -21,150 +19,25 @@ N_A     = 6.02214086e23 # Avogadro's number
 N_L     = 2.47937196e19 #Density at 1 atm and TREF in molec/cm3, P0/(kB*TREF)
 
 # ========================= DATACLASS =========================
-# Describen variantes de isotopólogos y especies completas para el forward
-@dataclass
-class Isotopologue: # Minimal configuration per isotopologue
-    iso: str
-    qfile: str
-    Wg: float
-    Pmol: float | None = None
-
 @dataclass
 class Species: # Gas species parameters
     name: str
     mol: int
-    iso: str
+    iso: int
     qfile: str
     Wg: float
     Pmol: float
-    extra_isotopologues: List[Isotopologue] = field(default_factory=list)
     Qref: float = field(init=False, default=np.nan)
     QT: float = field(init=False, default=np.nan)
     idx_all: np.ndarray | None = field(init=False, default=None)
 
-def _prepare_forward_variants(species: List[Species], use_all: bool) -> Tuple[List[Species], List[int]]:
-    """Expande cada especie en variantes individuales y recuerda su origen."""
-    variants: List[Species] = []
-    parent_map: List[int] = []
-    for parent_idx, sp in enumerate(species):
-        # Comenzamos con el isotopólogo base (siempre presente)
-        variant_defs = [Isotopologue(sp.iso, sp.qfile, sp.Wg, sp.Pmol)]
-        # Si se pide, añadimos las variantes configuradas adicionales
-        if use_all:
-            variant_defs.extend(sp.extra_isotopologues)
-        for variant in variant_defs:
-            variant_sp = Species(
-                name=sp.name,
-                mol=sp.mol,
-                iso=variant.iso,
-                qfile=variant.qfile,
-                Wg=variant.Wg,
-                Pmol=variant.Pmol if variant.Pmol is not None else sp.Pmol,
-            )
-            variants.append(variant_sp)  # Guardamos la copia aislada
-            parent_map.append(parent_idx)  # y su índice original
-    return variants, parent_map
-
-def _isotopologue_bank(base: str = "TIPS/") -> Dict[str, Dict[str, Any]]:
-    """Construye un catálogo (mol, Pmol, variantes) para cada especie."""
-    return {
-        "H2O": {
-            "mol": 1,
-            "Pmol": 1.876e+04 / 1e6,
-            "variants": [
-                Isotopologue(iso="1", qfile=base + "H2O/q1.txt", Wg=18.010565),
-                Isotopologue(iso="2", qfile=base + "H2O/q2.txt", Wg=20.014811),
-                Isotopologue(iso="3", qfile=base + "H2O/q3.txt", Wg=19.014780),
-                Isotopologue(iso="4", qfile=base + "H2O/q4.txt", Wg=19.016740),
-                Isotopologue(iso="5", qfile=base + "H2O/q5.txt", Wg=21.020985),
-                Isotopologue(iso="6", qfile=base + "H2O/q6.txt", Wg=20.020956),
-                Isotopologue(iso="7", qfile=base + "H2O/q129.txt", Wg=20.022915),
-            ],
-        },
-        "CO2": {
-            "mol": 2,
-            "Pmol": 330 / 1e6,
-            "variants": [
-                Isotopologue(iso="1", qfile=base + "CO2/q7.txt", Wg=43.989830),
-                Isotopologue(iso="2", qfile=base + "CO2/q8.txt", Wg=44.993185),
-                Isotopologue(iso="3", qfile=base + "CO2/q9.txt", Wg=45.994076),
-                Isotopologue(iso="4", qfile=base + "CO2/q10.txt", Wg=44.994045),
-                Isotopologue(iso="5", qfile=base + "CO2/q11.txt", Wg=46.997431),
-                Isotopologue(iso="6", qfile=base + "CO2/q12.txt", Wg=45.997400),
-                Isotopologue(iso="7", qfile=base + "CO2/q13.txt", Wg=47.998320),
-                Isotopologue(iso="8", qfile=base + "CO2/q14.txt", Wg=46.998291),
-                Isotopologue(iso="9", qfile=base + "CO2/q15.txt", Wg=45.998262),
-                Isotopologue(iso="10", qfile=base + "CO2/q120.txt", Wg=49.001675),
-                Isotopologue(iso="A", qfile=base + "CO2/q121.txt", Wg=48.001646),
-                Isotopologue(iso="B", qfile=base + "CO2/q122.txt", Wg=47.001618),
-            ],
-        },
-        "O3": {
-            "mol": 3,
-            "Pmol": 0.03017 / 1e6,
-            "variants": [
-                Isotopologue(iso="1", qfile=base + "O3/q16.txt", Wg=47.984745),
-                Isotopologue(iso="2", qfile=base + "O3/q17.txt", Wg=49.988991),
-                Isotopologue(iso="3", qfile=base + "O3/q18.txt", Wg=49.988991),
-                Isotopologue(iso="4", qfile=base + "O3/q19.txt", Wg=48.988960),
-                Isotopologue(iso="5", qfile=base + "O3/q20.txt", Wg=48.988960),
-            ],
-        },
-        "N2O": {
-            "mol": 4,
-            "Pmol": 0.32 / 1e6,
-            "variants": [
-                Isotopologue(iso="1", qfile=base + "N2O/q21.txt", Wg=44.001062),
-                Isotopologue(iso="2", qfile=base + "N2O/q22.txt", Wg=44.998096),
-                Isotopologue(iso="3", qfile=base + "N2O/q23.txt", Wg=44.998096),
-                Isotopologue(iso="4", qfile=base + "N2O/q24.txt", Wg=46.005308),
-                Isotopologue(iso="5", qfile=base + "N2O/q25.txt", Wg=45.005278),
-            ],
-        },
-        "CO": {
-            "mol": 5,
-            "Pmol": 0.15 / 1e6,
-            "variants": [
-                Isotopologue(iso="1", qfile=base + "CO/q26.txt", Wg=27.994915),
-                Isotopologue(iso="2", qfile=base + "CO/q27.txt", Wg=28.998270),
-                Isotopologue(iso="3", qfile=base + "CO/q28.txt", Wg=29.999161),
-                Isotopologue(iso="4", qfile=base + "CO/q29.txt", Wg=28.999130),
-                Isotopologue(iso="5", qfile=base + "CO/q30.txt", Wg=31.002516),
-                Isotopologue(iso="6", qfile=base + "CO/q31.txt", Wg=30.002485),
-            ],
-        },
-        "CH4": {
-            "mol": 6,
-            "Pmol": 1.7 / 1e6,
-            "variants": [
-                Isotopologue(iso="1", qfile=base + "CH4/q32.txt", Wg=16.031300),
-                Isotopologue(iso="2", qfile=base + "CH4/q33.txt", Wg=17.034655),
-                Isotopologue(iso="3", qfile=base + "CH4/q34.txt", Wg=17.037475),
-                Isotopologue(iso="4", qfile=base + "CH4/q35.txt", Wg=18.040830),
-            ],
-        },
-        "O2": {
-            "mol": 7,
-            "Pmol": 0.20946,
-            "variants": [
-                Isotopologue(iso="1", qfile=base + "O2/q36.txt", Wg=31.989830),
-                Isotopologue(iso="2", qfile=base + "O2/q37.txt", Wg=33.994076),
-                Isotopologue(iso="3", qfile=base + "O2/q38.txt", Wg=32.994045),
-            ],
-        },
-    }
-
-# ========================= FUNCTIONS =========================
 # ========================= FUNCTIONS =========================
 def convert_atm(P, u):
-    """Convierte presión entre unidades habituales y atmósferas."""
     if u == "gcms2":
-        return P/1013.25 * 10**-3  # pasa de g/cm²/s² a atm
+        return P/1013.25 * 10**-3
     elif u == "mbar":
-        return P/1013.25  # de milibares a atm
-
+        return P/1013.25
 def convert_vmr(ppm):
-    """Pasa de partes por millón a fracción molar."""
     return ppm * 1e-6
 
 def txt_to_npy(txt_path, out_path):
@@ -185,11 +58,10 @@ def txt_to_npy(txt_path, out_path):
     wave = np.array(waves)
     tr   = np.array(trans)
     np.save(out_path, [wave, tr])
-    print(f"Guardado como arreglo numpy en: {out_path}.npy")  # aviso al usuario
+    print(f"Guardado como arreglo numpy en: {out_path}.npy")
 
 
 def plot_npy(wave, tr, name):
-    # Dibuja la señal guardada en el numpy con un estilo limpio
     plt.figure(figsize=(16, 7))
     plt.plot(wave, tr, lw=2.5)
 
@@ -205,7 +77,6 @@ def plot_npy(wave, tr, name):
     
 
 def plot_histogram(wave, name, bins=60, range=None, ax=None):
-    # Histograma de densidad espectral para chequear distribución de puntos
     if ax is None:
         fig, ax = plt.subplots(figsize=(16, 7))
     else:
@@ -221,7 +92,7 @@ def plot_histogram(wave, name, bins=60, range=None, ax=None):
 
 
 def load_Q_vals(qfile: str, Tref: float, T: float) -> Tuple[float, float]:
-    """Carga el archivo q*.txt y calcula Q(Tref) y Q(T) por interpolación."""
+    """Read q*.txt and return Qref=Q(Tref), QT=Q(T)."""
     if not os.path.isfile(qfile):
         raise FileNotFoundError(f"Missing Q(T) file: {qfile}")
     try:
@@ -230,7 +101,6 @@ def load_Q_vals(qfile: str, Tref: float, T: float) -> Tuple[float, float]:
             raise ValueError
     except Exception:
         df = pd.read_csv(qfile, header=None, sep=r"[\s,;]+", engine="python", comment='#')
-    # Se asume que la primera columna es temperatura, la segunda Q(T)
     Tcol = df.iloc[:, 0].astype(float).to_numpy()
     Qcol = df.iloc[:, 1].astype(float).to_numpy()
     Qref = np.interp(Tref, Tcol, Qcol)
@@ -255,7 +125,7 @@ def read_hitran_par_minimal(path: str) -> Dict[str, np.ndarray]:
                 continue
             try:
                 s = [line[a:b] for a, b in sl]
-                mol.append(int(s[0])); iso.append(s[1].strip())
+                mol.append(int(s[0])); iso.append(int(s[1]))
                 nu0.append(float(s[2])); Sref.append(float(s[3]))
                 A.append(float(s[4])); g_air.append(float(s[5]))
                 g_self.append(float(s[6])); Elow.append(float(s[7]))
@@ -264,7 +134,7 @@ def read_hitran_par_minimal(path: str) -> Dict[str, np.ndarray]:
                 continue
 
     return dict(
-        mol=np.asarray(mol, dtype=np.int32), iso=np.asarray(iso, dtype='<U10'),
+        mol=np.asarray(mol, dtype=np.int32), iso=np.asarray(iso, dtype=np.int32),
         nu0=np.asarray(nu0, dtype=np.float64), Sref=np.asarray(Sref, dtype=np.float64),
         A=np.asarray(A, dtype=np.float64), g_air=np.asarray(g_air, dtype=np.float64),
         g_self=np.asarray(g_self, dtype=np.float64), Elow=np.asarray(Elow, dtype=np.float64),
@@ -334,31 +204,21 @@ def bin_average(x_sorted: np.ndarray, y_sorted: np.ndarray, edges: np.ndarray) -
     return centers, yb
 
 def default_species() -> List[Species]:
-    """Return the configured `Species` objects; each carries the top isotopologue plus a list of alternatives."""
-    bank = _isotopologue_bank()
-    order = ['H2O', 'CO2', 'O3', 'N2O', 'CO', 'CH4', 'O2']
-    species_list: List[Species] = []
-    for name in order:
-        entry = bank[name]
-        variants = entry['variants']
-        if not variants:
-            continue
-        main, *others = variants
-        species_list.append(Species(
-            name=name,
-            mol=entry['mol'],
-            iso=main.iso,
-            qfile=main.qfile,
-            Wg=main.Wg,
-            Pmol=entry['Pmol'],
-            extra_isotopologues=list(others),
-        ))
-    return species_list
+    base = "TIPS/"
+    return [
+        Species(name='H2O', mol=1, iso=1, qfile=base+'q1.txt',  Wg=18.0105, Pmol=1.876e+04/1e6),
+        Species(name='CO2', mol=2, iso=1, qfile=base+'q7.txt',  Wg=43.9898, Pmol=330/1e6),
+        Species(name='O3',  mol=3, iso=1, qfile=base+'q16.txt', Wg=47.9847, Pmol=0.03017/1e6),
+        Species(name='N2O', mol=4, iso=1, qfile=base+'q21.txt', Wg=44.0010, Pmol=0.32/1e6),
+        Species(name='CO',  mol=5, iso=1, qfile=base+'q26.txt', Wg=27.9949, Pmol=0.15/1e6),
+        Species(name='CH4', mol=6, iso=1, qfile=base+'q32.txt', Wg=16.0313, Pmol=1.7/1e6),
+        Species(name='O2',  mol=7, iso=1, qfile=base+'q36.txt', Wg=31.9998, Pmol=0.20946),
+    ]
 
 # ========================= MAIN FUNCTION =========================
 def run_simulation(
+    parfile: str,
     species: List[Species],
-    parfile: str = 'PARS/ALL.par',
     nu_min: float = 666.67,
     nu_max: float = 10000.0,
     dnu: float = 0.01,
@@ -372,49 +232,33 @@ def run_simulation(
     outdir: str = 'OUT',
     make_plots: bool = True,
     att: bool = True,
-    use_all_isotopologues: bool = False,
     simulated_dir: str = 'SIMULATED',
     transmission_npy_name: str | None = None,
-    species_to_use: List[str] | None = None,
 ) -> Dict[str, Any]:
     """
     Compute transmittances/attenuations and return sampled results.
     Set ``att`` to False to keep the raw transmittance signatures and skip attenuation plotting.
     ``simulated_dir`` and ``transmission_npy_name`` control the optional export of transmittance data as a stacked
     numpy array saved inside the provided directory.
-    When ``use_all_isotopologues`` is True each species will expand to its configured isotopologues (and that
-    configuration must provide iso-specific q-files and broadening coefficients) before running the forward model.
-    ``species_to_use`` is an optional list of species names (e.g., ['H2O', 'CO2']) to filter which species
-    from the input list will actually be simulated. If None, all species are used.
     """
     if not os.path.isfile(parfile):
         raise FileNotFoundError(f"Missing HITRAN .par: {parfile}")
-    
-    # Filter species based on species_to_use parameter
-    if species_to_use is not None:
-        species_to_use_upper = [s.upper() for s in species_to_use]
-        species = [sp for sp in species if sp.name.upper() in species_to_use_upper]
-        if not species:
-            raise ValueError(f"No species found matching: {species_to_use}")
-        print(f"Using species: {[sp.name for sp in species]}")
-    
-    forward_variants, variant_to_parent = _prepare_forward_variants(species, use_all_isotopologues)
-    for var in forward_variants:
-        print(f"DEBUG: {var.name} iso={var.iso} qfile={var.qfile} exists={os.path.isfile(var.qfile)}")
-        if not os.path.isfile(var.qfile):
-            raise FileNotFoundError(f"Missing q-file for {var.name} iso {var.iso}: {var.qfile}")
+    for sp in species:
+        print(f"DEBUG: {sp.name} qfile={sp.qfile} exists={os.path.isfile(sp.qfile)}")
+        if not os.path.isfile(sp.qfile):
+            raise FileNotFoundError(f"Missing q-file for {sp.name}: {sp.qfile}")
 
     # Load Q(T)
-    for var in forward_variants:
-        Qref, QT = load_Q_vals(var.qfile, TREF, temp_K)
-        var.Qref, var.QT = Qref, QT
+    for sp in species:
+        Qref, QT = load_Q_vals(sp.qfile, TREF, temp_K)
+        sp.Qref, sp.QT = Qref, QT
 
     # Read HITRAN .par
     H = read_hitran_par_minimal(parfile)
 
     # Line indices per species
-    for var in forward_variants:
-        var.idx_all = (H['mol'] == var.mol) & (H['iso'] == var.iso)
+    for sp in species:
+        sp.idx_all = (H['mol'] == sp.mol) & (H['iso'] == sp.iso)
 
     # Spectral tiling
     edges_tiles = np.arange(nu_min, nu_max + 1e-9, tileW)
@@ -426,24 +270,20 @@ def run_simulation(
         a_ext, b_ext = max(nu_min, a - guard), min(nu_max, b + guard)
         nu_ext = np.arange(a_ext, b_ext + 1e-12, dnu)
 
-        T_ext_each_variants = np.ones((len(forward_variants), nu_ext.size), dtype=np.float64)
-        for k, var in enumerate(forward_variants):
-            idx_tile = var.idx_all & (H['nu0'] >= a_ext) & (H['nu0'] <= b_ext)
+        T_ext_each = np.ones((len(species), nu_ext.size), dtype=np.float64)
+        for k, sp in enumerate(species):
+            idx_tile = sp.idx_all & (H['nu0'] >= a_ext) & (H['nu0'] <= b_ext)
             if np.any(idx_tile):
-                T_ext_each_variants[k, :] = transmittance_for_gas_tile(nu_ext, H, var, temp_K, pres, L_m, idx_tile)
+                T_ext_each[k, :] = transmittance_for_gas_tile(nu_ext, H, sp, temp_K, pres, L_m, idx_tile)
 
-        T_ext_prod = np.prod(T_ext_each_variants, axis=0)
-        T_species_ext = np.ones((len(species), nu_ext.size), dtype=np.float64)
-        for variant_idx, parent_idx in enumerate(variant_to_parent):
-            T_species_ext[parent_idx] *= T_ext_each_variants[variant_idx, :]
-        T_ext_sum = np.sum(T_species_ext, axis=0)
+        T_ext_prod, T_ext_sum = np.prod(T_ext_each, axis=0), np.sum(T_ext_each, axis=0)
 
         keep = (nu_ext >= a) & (nu_ext <= b)
         nu_all_parts.append(nu_ext[keep])
         T_prod_all_parts.append(T_ext_prod[keep])
         T_sum_all_parts.append(T_ext_sum[keep])
         for k in range(len(species)):
-            T_each_acc[k].append(T_species_ext[k, keep])
+            T_each_acc[k].append(T_ext_each[k, keep])
 
     nu_all = np.concatenate(nu_all_parts)
     T_prod, T_sum = np.concatenate(T_prod_all_parts), np.concatenate(T_sum_all_parts)
@@ -510,7 +350,7 @@ def run_simulation(
             min_val = np.min(arr[mask])
             max_val = np.max(arr[mask])
             lower = max(1e-15, min_val * 0.9)
-            upper = max_val * 10.0
+            upper = max(lower * 10, max_val * 1.2)
             if lower >= upper:
                 upper = lower * 10
             return lower, upper
