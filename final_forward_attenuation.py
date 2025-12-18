@@ -661,7 +661,7 @@ def run_simulation(
         if not transmission_npy_name.lower().endswith('.npy'):
             transmission_npy_name = f"{transmission_npy_name}.npy"
         transmission_path = os.path.join(sim_root, transmission_npy_name)
-        stacked = np.vstack([lambda_centers, T_prod_samp] + T_each_samp)
+        stacked = np.vstack([lambda_centers, T_prod_samp])
         np.save(transmission_path, stacked)
         result["transmission_npy_path"] = transmission_path
     else:
