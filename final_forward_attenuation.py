@@ -219,6 +219,30 @@ def plot_histogram(wave, name, bins=60, range=None, ax=None):
 
 
 
+def downsample(simulated_dir, gt_dir, output_dir):
+    lam_tgt = simulated_dir[0]  
+    lam_src = gt_dir[0]
+    tau_src = gt_dir[1]
+    edges = np.empty(lam_tgt.size + 1)
+    edges[1:-1] = 0.5 * (lam_tgt[:-1] + lam_tgt[1:])
+    edges[0]    = lam_tgt[0]  - 0.5 * (lam_tgt[1] - lam_tgt[0])
+    edges[-1]   = lam_tgt[-1] + 0.5 * (lam_tgt[-1] - lam_tgt[-2])
+    
+    # Limitar los bordes al rango de datos disponible en la fuente
+    edges[0] = max(edges[0], lam_src[0])
+    edges[-1] = min(edges[-1], lam_src[-1])
+    
+    cum = np.concatenate([[0.0], np.cumsum(0.5 * (tau_src[:-1] + tau_src[1:]) * (lam_src[1:] - lam_src[:-1]))])
+    def cum_at(x):
+        return np.interp(x, lam_src, cum)
+
+    area = cum_at(edges[1:]) - cum_at(edges[:-1])
+    tau_ds = area / (edges[1:] - edges[:-1])
+    valid = (edges[:-1] >= lam_src[0]) & (edges[1:] <= lam_src[-1])
+    tau_ds[~valid] = np.nan
+    out = np.vstack([lam_tgt, tau_ds])
+    np.save(output_dir, out)
+
 
 def load_Q_vals(qfile: str, Tref: float, T: float) -> Tuple[float, float]:
     """Carga el archivo q*.txt y calcula Q(Tref) y Q(T) por interpolación."""
